@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 # ================= CONFIG =================
 BOT_TOKEN = "8528454589:AAHffKDtvFJ2s_1_qX_NK2Gfkdz5wA4csCE"
 OWNER_ID = 8452357204
-WELCOME_IMAGE_PATH = "https://files.catbox.moe/zzlz4j.jpg"  # ඔබේ welcome image path
+WELCOME_IMAGE_PATH = "https://files.catbox.moe/zt8jow.png"  # welcome image URL
 # ==========================================
 
 bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
@@ -38,7 +38,7 @@ def dashboard_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row(KeyboardButton("🎯 Mission"), KeyboardButton("👥 Invite"))
     kb.row(KeyboardButton("📊 My Chart"), KeyboardButton("🏆 Leaderboard"))
-    kb.row(KeyboardButton("🎁 Gifts Info"))  # 👑 Admin Panel button අයිම් කරලා
+    kb.row(KeyboardButton("🎁 Gifts Info"))  # Admin Panel button removed
     return kb
 # ============================================
 
@@ -47,25 +47,42 @@ def dashboard_kb():
 async def start(message: Message):
     args = message.text.split()
     ref = int(args[1]) if len(args) > 1 and args[1].isdigit() else None
+    uid = message.from_user.id
 
-    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (message.from_user.id,))
+    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (uid,))
     user = cursor.fetchone()
+
     if not user:
         cursor.execute(
             "INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)",
-            (message.from_user.id, message.from_user.username, ref)
+            (uid, message.from_user.username, ref)
         )
         db.commit()
 
+        # ===== Referral notify owner =====
+        if ref:
+            # Increment referrer's referral count
+            cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id=?", (ref,))
+            db.commit()
+            try:
+                await bot.send_message(
+                    OWNER_ID,
+                    f"📢 New referral!\nUser @{message.from_user.username or uid} "
+                    f"joined using referral from User ID {ref}."
+                )
+            except:
+                pass
+
+    # Update username if changed
     cursor.execute("UPDATE users SET username=? WHERE user_id=?",
-                   (message.from_user.username, message.from_user.id))
+                   (message.from_user.username, uid))
     db.commit()
 
-    photo_path = FSInputFile(WELCOME_IMAGE_PATH)
+    photo_path = FSInputFile(WELCOME_IMAGE_PATH) if WELCOME_IMAGE_PATH.startswith("/") else WELCOME_IMAGE_PATH
     await message.answer_photo(
         photo=photo_path,
         caption=f"""
-🎉🌟 WELCOME TO STAR GIFT REWARDS BOT 🎁🌟
+🌟 WELCOME TO STAR GIFT REWARDS BOT 🌟 
 
 👋 Hello @{message.from_user.username or 'User'}!
 
@@ -84,7 +101,6 @@ async def dashboard_handler(message: Message):
     uid = message.from_user.id
     text = message.text
 
-    # ---------------- USER DASHBOARD ----------------
     if text == "🎯 Mission":
         await message.answer("🎯 Mission functionality coming soon.")
     elif text == "👥 Invite":
