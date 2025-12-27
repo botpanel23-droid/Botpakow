@@ -1,179 +1,128 @@
 import asyncio
-import sqlite3
-from aiogram import Bot, Dispatcher, Router
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, FSInputFile
-from aiogram.enums import ParseMode
-
-# ================= CONFIG =================
-BOT_TOKEN = "8528454589:AAHffKDtvFJ2s_1_qX_NK2Gfkdz5wA4csCE"
-OWNER_ID = 8452357204
-WELCOME_IMAGE_PATH = "https://files.catbox.moe/zt8jow.png"  # welcome image URL
-# ==========================================
-
-bot = Bot(BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
-router = Router()
-dp.include_router(router)
-
-# =============== DATABASE =================
-db = sqlite3.connect("starbot.db")
-cursor = db.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    referrals INTEGER DEFAULT 0,
-    coins INTEGER DEFAULT 0,
-    tasks_done INTEGER DEFAULT 0,
-    referred_by INTEGER
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery
 )
-""")
-db.commit()
-# ==========================================
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
 
-# =============== DASHBOARD KB ===============
-def dashboard_kb():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row(KeyboardButton("🎯 Mission"), KeyboardButton("👥 Invite"))
-    kb.row(KeyboardButton("📊 My Chart"), KeyboardButton("🏆 Leaderboard"))
-    kb.row(KeyboardButton("🎁 Gifts Info"))  # Admin Panel button removed
-    return kb
-# ============================================
+# ========== CONFIG ==========
+BOT_TOKEN = "8211519124:AAEG5NE2HI91ISvRtV50DzfGb71IM0KF030"
+ADMIN_ID = 8452357204
+CHANNEL_ID = -1001683128300
 
-# =============== START / WELCOME =============
-@router.message(CommandStart())
+MEMEZ_CHANNEL = "https://t.me/Meme_Channel_SL"
+MOVIE_CHANNEL = "https://t.me/Movie_Zone_Vip"
+
+CAPTION_TEXT = f"""😹😾😂
+
+Join us :- {MEMEZ_CHANNEL}
+Send Memez :- @Memez_Channel_Bot
+
+#Funny_Picture
+"""
+
+WELCOME_TEXT = f"""
+👋 <b>Hey There! Welcome to the Memez Zone</b> 😹🔥
+
+ඔයාට තියෙන්නෙ ඔයාගෙ ලස්සන Memez
+📸 Photo | 🎥 Video | 🖼 Sticker
+මෙතනට send කරන්න 😍
+
+😂 Best & Funny Memez
+🎯 Daily Entertainment
+💥 Sri Lanka Meme Hub
+
+━━━━━━━━━━━━━━━
+📢 <b>Memez Channel</b> :-
+👉 {MEMEZ_CHANNEL}
+
+🎬 <b>Movie Channel</b> :-
+👉 {MOVIE_CHANNEL}
+━━━━━━━━━━━━━━━
+
+😹😾😂 <b>Send your Memez now & make everyone laugh</b> 😂🔥
+"""
+
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()
+
+# ========== START ==========
+@dp.message(CommandStart())
 async def start(message: Message):
-    args = message.text.split()
-    ref = int(args[1]) if len(args) > 1 and args[1].isdigit() else None
-    uid = message.from_user.id
+    await message.answer(WELCOME_TEXT)
 
-    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (uid,))
-    user = cursor.fetchone()
+# ========== RECEIVE MEME ==========
+@dp.message(F.photo | F.video | F.sticker)
+async def receive_meme(message: Message):
 
-    if not user:
-        cursor.execute(
-            "INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)",
-            (uid, message.from_user.username, ref)
-        )
-        db.commit()
-
-        # ===== Referral notify owner =====
-        if ref:
-            # Increment referrer's referral count
-            cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id=?", (ref,))
-            db.commit()
-            try:
-                await bot.send_message(
-                    OWNER_ID,
-                    f"📢 New referral!\nUser @{message.from_user.username or uid} "
-                    f"joined using referral from User ID {ref}."
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Approve",
+                    callback_data=f"approve_{message.message_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Reject",
+                    callback_data=f"reject_{message.message_id}"
                 )
-            except:
-                pass
-
-    # Update username if changed
-    cursor.execute("UPDATE users SET username=? WHERE user_id=?",
-                   (message.from_user.username, uid))
-    db.commit()
-
-    photo_path = FSInputFile(WELCOME_IMAGE_PATH) if WELCOME_IMAGE_PATH.startswith("/") else WELCOME_IMAGE_PATH
-    await message.answer_photo(
-        photo=photo_path,
-        caption=f"""
-🌟 WELCOME TO STAR GIFT REWARDS BOT 🌟 
-
-👋 Hello @{message.from_user.username or 'User'}!
-
-🏆 You are now a participant in the exclusive
-✨ STAR EVENT – January Edition ✨
-
-Use the buttons below to start your adventure and earn stars!
-        """,
-        reply_markup=dashboard_kb()
+            ]
+        ]
     )
-# ============================================
 
-# =============== DASHBOARD / USER ACTIONS =========
-@router.message()
-async def dashboard_handler(message: Message):
-    uid = message.from_user.id
-    text = message.text
-
-    if text == "🎯 Mission":
-        await message.answer("🎯 Mission functionality coming soon.")
-    elif text == "👥 Invite":
-        await message.answer(
-            f"👥 Your invite link:\nhttps://t.me/{(await bot.me()).username}?start={uid}"
-        )
-    elif text == "📊 My Chart":
-        cursor.execute("SELECT referrals, coins, tasks_done FROM users WHERE user_id=?", (uid,))
-        row = cursor.fetchone()
-        referrals, coins, tasks = row if row else (0, 0, 0)
-        await message.answer(
-            f"📊 My Chart\n\n👥 Referrals: {referrals}\n⭐ Coins: {coins}\n🎯 Tasks Done: {tasks}"
-        )
-    elif text == "🏆 Leaderboard":
-        cursor.execute("SELECT username, referrals FROM users ORDER BY referrals DESC LIMIT 10")
-        rows = cursor.fetchall()
-        text = "🏆 Top 10 Users\n\n"
-        medals = ["🥇", "🥈", "🥉"]
-        for i, r in enumerate(rows):
-            medal = medals[i] if i < 3 else f"{i+1}."
-            text += f"{medal} @{r[0]} — {r[1]} refs\n"
-        await message.answer(text)
-    elif text == "🎁 Gifts Info":
-        await message.answer(
-            "🎁 Star Gifts Info\n🥇 100 Stars for 1st\n🥈 50 Stars for 2nd\n🥉 25 Stars for 3rd"
-        )
-
-# ============================================
-
-# =============== ADMIN COMMANDS ===============
-@router.message(Command("broadcast"))
-async def broadcast(message: Message):
-    if message.from_user.id != OWNER_ID:
-        return
-    text = message.get_args()
-    if not text:
-        await message.reply("❌ Usage: /broadcast <message>")
-        return
-    cursor.execute("SELECT user_id FROM users")
-    users = cursor.fetchall()
-    sent = 0
-    for u in users:
-        try:
-            await bot.send_message(u[0], text)
-            sent += 1
-        except:
-            pass
-    await message.reply(f"✅ Broadcast sent to {sent} users.")
-
-@router.message(Command("winners"))
-async def winners(message: Message):
-    if message.from_user.id != OWNER_ID:
-        return
-    cursor.execute("SELECT username, referrals FROM users ORDER BY referrals DESC LIMIT 3")
-    top = cursor.fetchall()
-    medals = ["🥇", "🥈", "🥉"]
-    text = "🎬 TOP 3 REFERRAL LEADERS\n\n"
-    for i, u in enumerate(top):
-        text += f"{medals[i]} @{u[0]} — {u[1]} referrals\n"
-    await message.reply(text)
-
-@router.message(Command("admine"))
-async def admine(message: Message):
-    if message.from_user.id != OWNER_ID:
-        return
-    await message.reply(
-        "👑 Admin Commands:\n"
-        "/broadcast <msg> — send message to all users\n"
-        "/winners — show top 3 referral users\n"
+    await message.forward(ADMIN_ID)
+    await bot.send_message(
+        ADMIN_ID,
+        "🆕 <b>New Meme Submission</b>",
+        reply_markup=keyboard
     )
-# ============================================
 
-# =============== RUN BOT ===============
+    await message.reply("✅ Meme sent for admin review 😹🔥")
+
+# ========== CALLBACK ==========
+@dp.callback_query()
+async def callback_handler(call: CallbackQuery):
+
+    if call.from_user.id != ADMIN_ID:
+        await call.answer("❌ Not allowed", show_alert=True)
+        return
+
+    action, msg_id = call.data.split("_")
+    replied = call.message.reply_to_message
+
+    if not replied:
+        await call.message.edit_text("⚠️ Original meme not found")
+        return
+
+    if action == "approve":
+        if replied.photo:
+            await bot.send_photo(
+                CHANNEL_ID,
+                replied.photo[-1].file_id,
+                caption=CAPTION_TEXT
+            )
+        elif replied.video:
+            await bot.send_video(
+                CHANNEL_ID,
+                replied.video.file_id,
+                caption=CAPTION_TEXT
+            )
+        elif replied.sticker:
+            await bot.send_sticker(
+                CHANNEL_ID,
+                replied.sticker.file_id
+            )
+
+        await call.message.edit_text("✅ Approved & Posted to Channel")
+
+    elif action == "reject":
+        await call.message.edit_text("❌ Meme Rejected")
+
+# ========== RUN ==========
 async def main():
     await dp.start_polling(bot)
 
