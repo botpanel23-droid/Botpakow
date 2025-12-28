@@ -1,135 +1,116 @@
 import asyncio
-import random
-from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
-from aiogram import Bot
-from aiogram.enums import ParseMode
+import aiohttp
+import sqlite3
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from datetime import datetime
 
 # ================= CONFIG =================
-BOT_TOKEN = "8488957878:AAHxqi_KRoErGQnKjVl-8qOtOWiEmtaWlrE"
+BOT_TOKEN = "7988776219:AAETqzJOvOFNc2904BkOhMAu8UDLU7QV2E4"
+CHANNEL_ID = "@Binanse_Auto_news_update_Sl"  # Telegram channel username or ID
+DEFAULT_IMAGE = "https://files.catbox.moe/s3z235.jpg"
+FOOTER_TEXT = "Join Us:- https://t.me/Binanse_Auto_news_update_Sl"
+NEWS_FEED_URL = "https://www.binance.com/en/support/announcement/c-48?navId=48"  # Binance official announcements
 
-CHANNELS = [
-    "@Quote_Pro_Sl",
-    "@your_channel_2"
-]
+# ================= DB =================
+conn = sqlite3.connect("posted_news.db")
+c = conn.cursor()
+c.execute("""
+CREATE TABLE IF NOT EXISTS posted_news (
+    news_id TEXT PRIMARY KEY
+)
+""")
+conn.commit()
 
-POST_INTERVAL = 1200  # 20 minutes
-FONT_PATH = "NotoSansSinhala-Bold.ttf"  # Sinhala font file
-IMAGE_SIZE = (800, 800)
-BACKGROUND_COLORS = [(255, 228, 225), (224, 255, 255), (240, 255, 240), (255, 250, 205)]
-# ==========================================
+# ================= BOT =================
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+# ================= GLOBALS =================
+bot_running = False
+post_image = DEFAULT_IMAGE
 
-# -------- Quote Line Banks --------
-LINE1 = [
-    "ජීවිතේ හැම දවසක්ම",
-    "කාලය අපිට කියලා දෙන්නේ",
-    "සාර්ථකත්වය කියන්නේ",
-    "ඔයාගේ හිත ඇතුලේ",
-    "අද දවස කියන්නේ"
-]
+# ================= FUNCTIONS =================
+async def fetch_binance_news():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(NEWS_FEED_URL) as resp:
+            if resp.status == 200:
+                data = await resp.text()
+                return data
+            return None
 
-LINE2 = [
-    "අපි නොදකින අර්ථයක් තියෙනවා",
-    "අපිව වෙනස් කරන මොහොතක්",
-    "ඉවසීම පරීක්ෂා වෙන වෙලාවක්",
-    "නව ආරම්භයක් ලඟා වෙන තැනක්"
-]
+# Dummy parser: implement proper parsing from Binance page / RSS
+def parse_news(html_text):
+    """
+    Parse latest news from HTML or RSS feed.
+    Returns list of dicts: [{'id': '1234', 'title': 'New Coin Listing XYZ', 'desc': 'Trading starts ...', 'link': 'https://...'}]
+    """
+    # For demo, return a fake single news
+    news_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return [{
+        "id": news_id,
+        "title": "New Coin Listing: XYZ",
+        "desc": "Trading starts today on Binance spot market.",
+        "link": "https://www.binance.com/en/trade/XYZ"
+    }]
 
-LINE3 = [
-    "අද කරන පොඩි උත්සාහය",
-    "නවතින්නේ නැති හිතක්",
-    "අතහැර නොයන සිහිනක්",
-    "විශ්වාසයෙන් ගත්ත පියවරක්"
-]
+async def post_news(news_item):
+    # Check duplicate
+    c.execute("SELECT news_id FROM posted_news WHERE news_id=?", (news_item['id'],))
+    if c.fetchone():
+        return
+    # Format message
+    msg_text = f"🚨 BINANCE OFFICIAL UPDATE 🚨\n\n📰 {news_item['title']}\n💡 {news_item['desc']}\n📌 More info: {news_item['link']}\n\n{FOOTER_TEXT}"
+    # Send photo + caption
+    await bot.send_photo(chat_id=CHANNEL_ID, photo=post_image, caption=msg_text)
+    # Save to DB
+    c.execute("INSERT INTO posted_news (news_id) VALUES (?)", (news_item['id'],))
+    conn.commit()
 
-LINE4 = [
-    "හෙට ලොකු ජයග්‍රහණයක් වෙනවා",
-    "ඔයාගේ ජීවිතය සම්පූර්ණයෙන් වෙනස් කරයි",
-    "අනාගතය ලස්සන කරලා දමයි",
-    "කාලයත් එක්ක අගය දෙනවා"
-]
+async def news_loop():
+    global bot_running
+    while bot_running:
+        html = await fetch_binance_news()
+        if html:
+            news_list = parse_news(html)
+            for news in news_list:
+                await post_news(news)
+        await asyncio.sleep(120)  # check every 2 minutes
 
-EMOJIS = ["✨", "🔥", "💫", "🌱", "💭", "❤️"]
+# ================= ADMIN COMMANDS =================
+@dp.message(Command("startbot"))
+async def cmd_startbot(message: types.Message):
+    global bot_running
+    if bot_running:
+        await message.reply("Bot is already running!")
+    else:
+        bot_running = True
+        asyncio.create_task(news_loop())
+        await message.reply("Bot started posting Binance news!")
 
-HASHTAGS = [
-    "#Motivation",
-    "#LifeQuotes",
-    "#Mindset",
-    "#Success",
-    "#DailyQuote",
-    "#PositiveVibes"
-]
+@dp.message(Command("stopbot"))
+async def cmd_stopbot(message: types.Message):
+    global bot_running
+    bot_running = False
+    await message.reply("Bot stopped posting.")
 
-USED_QUOTES = set()
+@dp.message(Command("setimage"))
+async def cmd_setimage(message: types.Message):
+    global post_image
+    args = message.get_args()
+    if not args:
+        await message.reply("Usage: /setimage <image_url>")
+        return
+    post_image = args
+    await message.reply(f"Post image updated to: {post_image}")
 
-# -------- Quote Generator --------
-def generate_quote():
-    while True:
-        quote = (
-            f"{random.choice(LINE1)}\n"
-            f"{random.choice(LINE2)}\n\n"
-            f"{random.choice(LINE3)}\n"
-            f"{random.choice(LINE4)}"
-        )
-        if quote not in USED_QUOTES:
-            USED_QUOTES.add(quote)
-            return quote
+@dp.message(Command("status"))
+async def cmd_status(message: types.Message):
+    global bot_running
+    status = "running" if bot_running else "stopped"
+    await message.reply(f"Bot status: {status}\nCurrent image: {post_image}")
 
-# -------- Image Generator --------
-def create_quote_image(quote):
-    bg_color = random.choice(BACKGROUND_COLORS)
-    image = Image.new("RGB", IMAGE_SIZE, color=bg_color)
-    draw = ImageDraw.Draw(image)
-    try:
-        font = ImageFont.truetype(FONT_PATH, 36)
-    except:
-        font = ImageFont.load_default()
-
-    lines = quote.split("\n")
-    y_text = 50
-    for line in lines:
-        w, h = draw.textsize(line, font=font)
-        draw.text(((IMAGE_SIZE[0]-w)/2, y_text), line, font=font, fill=(0,0,0))
-        y_text += h + 20
-
-    output = BytesIO()
-    image.save(output, format="PNG")
-    output.seek(0)
-    return output
-
-# -------- Auto Poster --------
-async def auto_post():
-    print("🤖 Ultimate Quote + Image Bot Started (20 min / 2 channels)")
-
-    while True:
-        try:
-            quote = generate_quote()
-            emoji = random.choice(EMOJIS)
-            tags = " ".join(random.sample(HASHTAGS, 3))
-            caption = f"{emoji} <b>{quote}</b>\n\n{tags}"
-
-            image_bytes = create_quote_image(quote)
-
-            for channel in CHANNELS:
-                await bot.send_photo(channel, photo=image_bytes, caption=caption, parse_mode=ParseMode.HTML)
-
-            print("✅ Quote image sent to all channels")
-
-        except Exception as e:
-            print("⚠️ Error:", e)
-
-        await asyncio.sleep(POST_INTERVAL)
-
-# -------- Runner --------
-async def main():
-    while True:
-        try:
-            await auto_post()
-        except Exception as e:
-            print("♻️ Restarting bot loop:", e)
-            await asyncio.sleep(5)
-
+# ================= RUN BOT =================
 if __name__ == "__main__":
-    asyncio.run(main())
+    print("Bot is starting...")
+    asyncio.run(dp.start_polling(bot))
